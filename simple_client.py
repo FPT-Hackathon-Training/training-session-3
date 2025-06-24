@@ -16,7 +16,7 @@ DESTINATION = sys.argv[3]
 # Server gửi lệnh điều khiển đến xe
 TOPIC_SERVER_COMMAND = "training/agv/{vehicle_id}/command"
 # Server gửi thông báo đăng ký thành công đến xe
-TOPIC_SERVER_REGISTRATION = "training/agv/d/registration"
+TOPIC_SERVER_REGISTRATION = "training/agv/{vehicle_id}/registration"
 
 # Client - Publisher
 # Xe gửi cập nhật trạng thái lên server
@@ -28,7 +28,6 @@ TOPIC_CLIENT_REGISTER = "training/agv/register"
 def on_connect(client, userdata, flags, rc):
     # Đăng ký chủ đề nhận vị trí xe từ server
     client.subscribe(TOPIC_SERVER_COMMAND.format(vehicle_id=VEHICLE_ID))
-    print(TOPIC_SERVER_REGISTRATION.format(vehicle_id=VEHICLE_ID))
     client.subscribe(TOPIC_SERVER_REGISTRATION.format(vehicle_id=str(VEHICLE_ID)))
 
 # Hàm callback khi nhận được tin nhắn từ broker
