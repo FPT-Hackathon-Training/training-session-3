@@ -10,10 +10,14 @@
 pip install -r requirements.txt
 ```
 ### How to run
+Run server
 ```bash
-python main.py
+python simple_server.py
 ```
-
+Run Client
+```bash
+python simple_client.py v1 6 2
+```
 ## Homework
 
 1. Collision handling occurs when 2 vehicles occupy the same edge
