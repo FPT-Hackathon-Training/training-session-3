@@ -18,7 +18,7 @@ class MapClient:
             data = response.json()
             
             if 'results' in data:
-                self.maps = [Map(map_data) for map_data in data['results']]
+                self.maps = [Map(map_data) for map_data in data['results'][:1]]
                 console.print(f"[bold green]✓ Successfully fetched {len(self.maps)} map(s)[/bold green]\n")
 
                 self.destinationPositions = data['results'][0].get('destination_positions', [])
