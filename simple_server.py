@@ -12,15 +12,15 @@ BROKER_PORT = 32067
 
 # Server - Publisher
 # Server gửi lệnh điều khiển đến xe
-TOPIC_SERVER_COMMAND = "training/agv/{vehicle_id}/command"
+TOPIC_SERVER_COMMAND = "dattt/training/agv/{vehicle_id}/command"
 # Server gửi thông báo đăng ký thành công đến xe
-TOPIC_SERVER_REGISTRATION = "training/agv/{vehicle_id}/registration"
+TOPIC_SERVER_REGISTRATION = "dattt/training/agv/{vehicle_id}/registration"
 
 # Server - Subscriber
 # Xe gửi cập nhật trạng thái lên server
-TOPIC_CLIENT_STATUS = "training/agv/+/status"
+TOPIC_CLIENT_STATUS = "dattt/training/agv/{}/status"
 # Xe gửi yêu cầu đăng ký
-TOPIC_CLIENT_REGISTER = "training/agv/register"
+TOPIC_CLIENT_REGISTER = "dattt/training/agv/register"
 
 # Đối tượng quản lý xe
 vehicle_manager = VehicleManager()
@@ -35,47 +35,88 @@ if not map_client.maps:
 
 # Hàm callback khi kết nối đến broker thành công
 def on_connect(mqtt_client, userdata, flags, rc):
-    mqtt_client.subscribe(TOPIC_CLIENT_STATUS)
+    mqtt_client.subscribe(TOPIC_CLIENT_STATUS.format("+"))  # Đăng ký nhận tất cả trạng thái từ các xe
     mqtt_client.subscribe(TOPIC_CLIENT_REGISTER)
 
 # Hàm callback khi nhận được tin nhắn từ broker
 def on_message(mqtt_client, userdata, msg):
-    if msg.topic == TOPIC_CLIENT_STATUS:
-        try:
-            payload = json.loads(msg.payload.decode())
-            print(payload)
-        except json.JSONDecodeError:
-            print("Lỗi phân tích cú pháp JSON cho trạng thái xe.")
+    payload = json.loads(msg.payload.decode())
+
+    if msg.topic.endswith("status"):
+        vehicle_id = payload['vehicle_id']
+        if vehicle_manager.vehicles[vehicle_id].is_at_destination():
+            vehicle_manager.vehicles[vehicle_id].change_status("finished")
+        else:
+            vehicle_manager.vehicles[vehicle_id].change_status(payload['status'])
+        handle_update_status()
+
     elif msg.topic == TOPIC_CLIENT_REGISTER:
         try:
-            payload = json.loads(msg.payload.decode())
+            print(f"Nhận yêu cầu đăng ký từ xe {payload['vehicle_id']}: {payload}")
+            # Xử lý yêu cầu đăng ký
             if handle_register(payload['vehicle_id'], payload['source'], payload['destination']):
-                # Gửi thông báo đăng ký thành công
-                register_payload = {
+                # Gửi thông báo đăng ký thành công đến xe
+                registration_payload = {
                     "vehicle_id": payload['vehicle_id'],
-                    "status": "registered",
+                    "status": "success",
                 }
-
-                print(TOPIC_SERVER_REGISTRATION.format(vehicle_id=payload['vehicle_id']))
-                mqtt_client.publish(TOPIC_SERVER_REGISTRATION.format(vehicle_id=payload['vehicle_id']), json.dumps(register_payload))
-                print(f"Đăng ký thành công cho xe {payload['vehicle_id']}.")
+                mqtt_client.publish(TOPIC_SERVER_REGISTRATION.format(vehicle_id=payload['vehicle_id']), json.dumps(registration_payload))
         except json.JSONDecodeError:
             print("Lỗi phân tích cú pháp JSON cho lệnh đăng ký.")
 
 # Hàm xử lý đăng ký xe mới
 def handle_register(vehicle_id, source, destination):
     """Xử lý đăng ký xe mới"""
-    if vehicle_id not in vehicle_manager.vehicles:
-        vehicle = Vehicle(vehicle_id=vehicle_id,
+    vehicle = Vehicle(vehicle_id=vehicle_id,
                           source=int(source),
                           destination=int(destination),
                           map_client=map_client)
+    try:
         vehicle_manager.add_vehicle(vehicle_id, vehicle)
+        time.sleep(1)
         return True
-    else:
-        print(f"Xe {vehicle_id} đã được đăng ký trước đó.")
+    except ValueError:
         return False
+    
+def handle_update_status():
+    # Kiểm tra xem các xe đã sẵn sàng chưa
+    if not vehicle_manager.vehicles_ready:
+        return
+    
+    # Các xe đã về đích chưa
+    if vehicle_manager.is_complete():
+        print("Tất cả xe đã đến đích.")
+        return
+    
+    if vehicle_manager.has_moving_vehicle():
+        return
 
+    # Xử lý điều khiển xe
+    vehicle_manager.schedule_vehicles()
+
+    for vehicle_id, vehicle in vehicle_manager.vehicles.items():
+        if vehicle.status == "finished":
+            continue
+
+        elif vehicle.status == "moving":
+            command_payload = {
+                "vehicle_id": vehicle_id,
+                "command": "move",
+                "is_moving": 1,
+                "current_step": vehicle.get_current_step(),
+                "current_node": vehicle.get_current_node(),
+            }
+            mqtt_client.publish(TOPIC_SERVER_COMMAND.format(vehicle_id=vehicle_id), json.dumps(command_payload))
+
+        elif vehicle.status == "waiting":
+            command_payload = {
+                "vehicle_id": vehicle_id,
+                "command": "wait",
+                "is_moving": 0,
+                "current_step": vehicle.get_current_step(),
+                "current_node": vehicle.get_current_node(),
+            }
+            mqtt_client.publish(TOPIC_SERVER_COMMAND.format(vehicle_id=vehicle_id), json.dumps(command_payload))
 
 
 # Khởi tạo kết nối MQTT client
@@ -89,15 +130,28 @@ except Exception as e:
     exit(1)
 mqtt_client.loop_start()
 
-while not vehicle_manager.vehicles_ready:
-    time.sleep(1)  # Chờ cho đến khi có đủ xe đăng ký
+# while not vehicle_manager.vehicles_ready:
+#     time.sleep(1)  # Chờ cho đến khi có đủ xe 2 đăng ký
+        
+while True:
+    try:
+        # for vehicle_id, vehicle in vehicle_manager.vehicles.items():
+        #     # Gửi lệnh điều khiển đến xe
+        #     command_payload = {
+        #         "vehicle_id": vehicle_id,
+        #         "command": "move",
+        #         "source": vehicle.source,
+        #         "destination": vehicle.destination,
+        #     }
+        #     mqtt_client.publish(TOPIC_SERVER_COMMAND.format(vehicle_id=vehicle_id), json.dumps(command_payload))
+        #     print(f"Gửi lệnh di chuyển đến xe {vehicle_id}.")
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nĐang dừng server...")
+        break
+    except Exception as e:
+        print(f"Có lỗi xảy ra: {e}")
 
-# Kiểm tra va chạm tiềm năng
-# if not vehicle_manager.collision_detected:
-    # Instruct vehicles to start moving
-
-
-print("Server đã dừng.")
 mqtt_client.loop_stop()
 mqtt_client.disconnect()
-
+print("Server đã dừng.")
